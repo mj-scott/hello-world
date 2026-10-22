@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cats Dancing in the Rain</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d1f; }
+  canvas { display: block; }
+  #sound {
+    position: fixed; top: 14px; right: 14px; z-index: 2;
+    font: 600 14px/1 system-ui, sans-serif; color: #fff;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.35);
+    border-radius: 999px; padding: 10px 16px; cursor: pointer;
+    backdrop-filter: blur(6px);
+  }
+  #sound:hover { background: rgba(255,255,255,.26); }
+</style>
+</head>
+<body>
+<button id="sound" type="button">🔇 Sound off</button>
+<script>
+// ---------- Settings ----------
+const BPM = 112;
+const BEAT_MS = 60000 / BPM;
+
+let groundY, S;              // ground line + cat scale
+let cats = [], puddles = [], buildings = [];
+let drops = [], ripples = [], bits = [];
+let wind = 0, windTarget = 0;
+let flash = 0, bolt = null, boltLife = 0;
+let epoch = 0;               // time zero of the beat clock
+
+function setup() {
+  const c = createCanvas(windowWidth, windowHeight);
+  c.mousePressed(strike);
+  layout();
+  for (let i = 0; i < 520; i++) drops.push(newDrop(true));
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  layout();
+}
+
+function layout() {
+  groundY = height * 0.8;
+  S = constrain(min(width / 700, height / 520), 0.5, 1.6);
+  const xs = [0.24, 0.5, 0.76];
+  cats = [
+    { x: width * xs[0], dance: 'sway', fur: '#f2a14b', belly: '#fde2b8', stripe: '#c9741f', umbrella: '#e0446a' },
+    { x: width * xs[1], dance: 'hop',  fur: '#9aa6b8', belly: '#e6ebf3', stripe: '#6f7b8f', umbrella: null },
+    { x: width * xs[2], dance: 'spin', fur: '#2b2b3a', belly: '#f4f1ea', stripe: null,      umbrella: '#3fb6c9' },
+  ];
+  puddles = cats.map((c, i) => ({ x: c.x + (i - 1) * 8, w: 190 * S, h: 22 * S }));
+  buildings = [];
+  let x = -20;
+  while (x < width + 20) {
+    const w = random(50, 110), h = random(height * 0.12, height * 0.36);
+    const wins = [];
+    for (let wy = 14; wy < h - 10; wy += 20)
+      for (let wx = 10; wx < w - 12; wx += 18) wins.push({ x: wx, y: wy, on: random() < 0.35 });
+    buildings.push({ x, w, h, wins });
+    x += w + random(0, 8);
+  }
+}
+
+// ---------- Rain ----------
+function newDrop(anywhere) {
+  const z = random(0.5, 1.5);
+  return {
+    x: random(-100, width + 100),
+    y: anywhere ? random(-height, groundY) : random(-80, -10),
+    z,
+    land: groundY + (z - 0.5) * 70 + random(-6, 6),
+  };
+}
+
+function updateRain() {
+  wind = lerp(wind, windTarget, 0.05);
+  const umbs = cats.filter(c => c.umb).map(c => c.umb);
+  for (const d of drops) {
+    d.x += wind * d.z * 2.2;
+    d.y += 15 * d.z;
+
+    // hit an umbrella canopy?
+    let caught = false;
+    for (const u of umbs) {
+      const dx = d.x - u.x;
+      if (abs(dx) < u.r) {
+        const top = u.y - u.r * 0.5 * sqrt(1 - (dx / u.r) ** 2);
+        if (d.y > top && d.y < u.y) {
+          for (let i = 0; i < 2; i++)
+            bits.push({ x: d.x, y: top, vx: random(-1.5, 1.5) + dx * 0.03, vy: random(-3, -1), life: 18 });
+          caught = true;
+          break;
+        }
+      }
+    }
+    if (caught) { Object.assign(d, newDrop(false)); continue; }
+
+    if (d.y >= d.land) {
+      if (random() < 0.55) ripples.push({ x: d.x, y: d.land, r: 2, max: random(12, 26) * d.z, a: 160 });
+      if (random() < 0.3)
+        for (let i = 0; i < 2; i++)
+          bits.push({ x: d.x, y: d.land, vx: random(-1.2, 1.2), vy: random(-3.5, -1.5), life: 16 });
+      Object.assign(d, newDrop(false));
+    }
+  }
+  for (const r of ripples) { r.r += 0.7; r.a -= 7; }
+  ripples = ripples.filter(r => r.a > 0 && r.r < r.max);
+  for (const b of bits) { b.x += b.vx; b.y += b.vy; b.vy += 0.3; b.life--; }
+  bits = bits.filter(b => b.life > 0);
+}
+
+function drawRain() {
+  strokeCap(ROUND);
+  for (const d of drops) {
+    const len = 12 * d.z;
+    stroke(190, 215, 255, 70 + d.z * 70);
+    strokeWeight(d.z * 1.3);
+    line(d.x, d.y, d.x - wind * d.z * 2.2 * len / 15, d.y - len);
+  }
+  noFill();
+  for (const r of ripples) {
+    stroke(210, 230, 255, r.a * min(1, r.r / 6));
+    strokeWeight(1.2);
+    ellipse(r.x, r.y, r.r * 2, r.r * 0.6);
+  }
+  noStroke();
+  for (const b of bits) {
+    fill(215, 232, 255, b.life * 12);
+    circle(b.x, b.y, 2.2);
+  }
+}
+
+// ---------- Scene ----------
+function drawSky() {
+  const g = drawingContext.createLinearGradient(0, 0, 0, groundY);
+  g.addColorStop(0, '#0b0d24');
+  g.addColorStop(0.6, '#2a2552');
+  g.addColorStop(1, '#5a4a7a');
+  drawingContext.fillStyle = g;
+  rect(0, 0, width, groundY + 1);
+
+  // clouds
+  noStroke();
+  fill(20, 20, 45, 150);
+  for (let i = 0; i < 7; i++) {
+    const cx = (i * width / 6 + frameCount * 0.15 * (i % 2 ? 1 : 0.6)) % (width + 300) - 150;
+    const cy = 40 + (i * 37) % 90;
+    for (let k = 0; k < 5; k++) ellipse(cx + k * 45 - 90, cy + sin(k * 2 + i) * 14, 130, 60);
+  }
+
+  // skyline
+  for (const b of buildings) {
+    const by = groundY - b.h;
+    fill(18, 16, 40);
+    rect(b.x, by, b.w, b.h);
+    for (const w of b.wins) {
+      fill(w.on ? color(255, 214, 120, 190) : color(40, 38, 70, 200));
+      rect(b.x + w.x, by + w.y, 9, 11);
+    }
+  }
+}
+
+function drawGround() {
+  const g = drawingContext.createLinearGradient(0, groundY, 0, height);
+  g.addColorStop(0, '#3b3560');
+  g.addColorStop(1, '#14122b');
+  drawingContext.fillStyle = g;
+  noStroke();
+  rect(0, groundY, width, height - groundY);
+
+  // streetlight glow on the wet road
+  const lx = width * 0.5;
+  noStroke();
+  for (let i = 5; i > 0; i--) {
+    fill(255, 210, 130, 10);
+    ellipse(lx, groundY + 18, width * 0.28 * i / 2, 60 * i / 2);
+  }
+
+  // puddles
+  for (const p of puddles) {
+    fill(110, 130, 200, 90);
+    ellipse(p.x, groundY + 24 * S, p.w, p.h);
+    fill(255, 220, 160, 40);
+    ellipse(p.x, groundY + 24 * S, p.w * 0.6, p.h * 0.5);
+  }
+}
+
+// ---------- Cats ----------
+function drawCat(c, ph) {
+  const s = S;
+  let lift = 0, lean = 0, sx = 1, squash = 1;
+  let armA = 0.5, armB = 0.5;     // radians; 0 = straight down, PI = straight up
+  let tail = sin(ph * TWO_PI) * 0.35;
+
+  if (c.dance === 'sway') {
+    lean = sin(ph * PI) * 0.16;
+    lift = abs(sin(ph * PI)) * 5;
+    armA = 1.5 + sin(ph * PI) * 0.5;
+    armB = 0.8 - sin(ph * PI) * 0.5;
+  } else if (c.dance === 'hop') {
+    const j = abs(sin(ph * PI));
+    lift = j * 46;
+    squash = 1 + (1 - j) * 0.04 - j * 0.03;
+    armA = 2.2 + j * 0.8;
+    armB = 2.2 + j * 0.8;
+  } else {
+    // spin: wiggle, with a full twirl every 8 beats
+    lean = sin(ph * TWO_PI) * 0.1;
+    lift = abs(sin(ph * PI)) * 10;
+    const m = ph % 8;
+    if (m > 6) sx = cos((m - 6) * PI);
+    armA = 1.3 + sin(ph * TWO_PI) * 0.9;
+    armB = 1.3 - sin(ph * TWO_PI) * 0.9;
+    tail = sin(ph * TWO_PI * 2) * 0.5;
+  }
+
+  const wet = !c.umbrella;
+  const furCol = wet ? lerpColor(color(c.fur), color(20, 25, 60), 0.18) : color(c.fur);
+
+  push();
+  translate(c.x, groundY + 22 * s - lift * s);
+  scale(s * sx, s * squash);
+  rotate(lean);
+  strokeJoin(ROUND);
+  strokeCap(ROUND);
+
+  // tail
+  noFill();
+  stroke(furCol);
+  strokeWeight(12);
+  const tw = tail * 40;
+  bezier(-26, -22, -62, -22, -70 + tw, -60, -52 + tw, -92 - tw * 0.3);
+  if (c.stripe) { stroke(c.stripe); strokeWeight(5); point(-60 + tw * 0.9, -78 - tw * 0.2); }
+
+  // legs
+  stroke(furCol);
+  strokeWeight(14);
+  const step = sin(ph * PI) * 5;
+  line(-14, -16, -14 - step * 0.4, -2);
+  line(14, -16, 14 + step * 0.4, -2);
+  strokeWeight(2);
+  stroke(0, 40);
+  noStroke();
+  fill(c.belly);
+  ellipse(-14 - step * 0.4, 0, 20, 10);
+  ellipse(14 + step * 0.4, 0, 20, 10);
+
+  // body
+  fill(furCol);
+  ellipse(0, -44, 66, 74);
+  fill(c.belly);
+  ellipse(0, -40, 36, 50);
+  if (c.stripe) {
+    stroke(c.stripe); strokeWeight(4); noFill();
+    for (let i = -1; i <= 1; i++) { line(-30, -52 + i * 12, -22, -52 + i * 12 + 3); line(30, -52 + i * 12, 22, -52 + i * 12 + 3); }
+    noStroke();
+  }
+
+  // arms (hand positions)
+  const shoulderY = -58, len = 34;
+  const armSide = (side, a) => {
+    const sxp = side * 25, hx = sxp + side * len * sin(a), hy = shoulderY + len * cos(a);
+    stroke(furCol); strokeWeight(11);
+    line(sxp, shoulderY, hx, hy);
+    noStroke(); fill(c.belly); circle(hx, hy, 12);
+    return { x: hx, y: hy };
+  };
+  const handL = armSide(-1, armA);
+  let handR;
+
+  // head
+  const hy = -98;
+  // umbrella arm is drawn to hold the pole; handled after head for layering
+  if (c.umbrella) handR = armSide(1, 2.5); else handR = armSide(1, armB);
+
+  fill(furCol);
+  triangle(-30, hy - 8, -24, hy - 40, -6, hy - 22);
+  triangle(30, hy - 8, 24, hy - 40, 6, hy - 22);
+  fill(255, 170, 190);
+  triangle(-25, hy - 14, -23, hy - 32, -12, hy - 21);
+  triangle(25, hy - 14, 23, hy - 32, 12, hy - 21);
+  fill(furCol);
+  ellipse(0, hy, 72, 58);
+  if (c.stripe) {
+    stroke(c.stripe); strokeWeight(4);
+    line(0, hy - 29, 0, hy - 17); line(-9, hy - 28, -7, hy - 18); line(9, hy - 28, 7, hy - 18);
+    noStroke();
+  }
+  fill(c.belly);
+  ellipse(0, hy + 10, 38, 26);
+
+  // face (hidden when the back is turned mid-twirl)
+  if (sx > 0) {
+    noFill();
+    stroke(25, 20, 30); strokeWeight(3);
+    if (c.dance === 'hop') {
+      noStroke(); fill(25, 20, 30);
+      ellipse(-14, hy - 2, 11, 14); ellipse(14, hy - 2, 11, 14);
+      fill(255); circle(-12, hy - 5, 4); circle(16, hy - 5, 4);
+    } else {
+      arc(-14, hy, 14, 12, PI, TWO_PI);
+      arc(14, hy, 14, 12, PI, TWO_PI);
+    }
+    noStroke();
+    fill(255, 120, 150);
+    triangle(-4, hy + 8, 4, hy + 8, 0, hy + 13);
+    noFill(); stroke(25, 20, 30); strokeWeight(2.5);
+    arc(-5, hy + 14, 10, 9, 0, PI);
+    arc(5, hy + 14, 10, 9, 0, PI);
+    strokeWeight(1.4);
+    line(-24, hy + 9, -44, hy + 5); line(-24, hy + 13, -44, hy + 15);
+    line(24, hy + 9, 44, hy + 5);   line(24, hy + 13, 44, hy + 15);
+    noStroke();
+    fill(255, 140, 160, 90);
+    ellipse(-24, hy + 8, 12, 7); ellipse(24, hy + 8, 12, 7);
+  }
+
+  // umbrella
+  if (c.umbrella) {
+    const px = handR.x, topY = handR.y - 74, r = 76;
+    stroke(70, 60, 80); strokeWeight(4);
+    line(px, handR.y + 6, px, topY);
+    noFill();
+    arc(px + 8, handR.y + 8, 16, 14, 0, PI);   // handle hook
+    noStroke();
+    fill(c.umbrella);
+    arc(px, topY, r * 2, r, PI, TWO_PI, CHORD);
+    fill(255, 255, 255, 45);
+    arc(px, topY, r * 2, r, PI + 0.3, PI + 1.4, PIE);
+    stroke(0, 50); strokeWeight(2);
+    for (let i = -2; i <= 2; i++) line(px, topY - r * 0.5, px + i * r * 0.4, topY);
+    noStroke();
+    fill(c.umbrella);
+    circle(px, topY - r * 0.5 - 2, 6);
+    // remember where it is on screen so the rain can bounce off it
+    const m = drawingContext.getTransform(), d = pixelDensity();
+    c.umb = { x: (m.a * px + m.c * topY + m.e) / d, y: (m.b * px + m.d * topY + m.f) / d, r: r * s * 0.98 };
+  } else {
+    c.umb = null;
+    // water drops shaking off the wet cat
+    noStroke(); fill(190, 220, 255, 190);
+    const t = ph * 2;
+    for (let i = 0; i < 3; i++) {
+      const a = (t + i * 0.33) % 1;
+      circle(-30 + i * 30 + sin(i * 5) * 8, hy - 26 + a * 60, 4 * (1 - a * 0.4));
+    }
+  }
+  pop();
+}
+
+// ---------- Lightning ----------
+function strike() {
+  flash = 255;
+  const pts = [];
+  let x = random(width * 0.15, width * 0.85), y = 0;
+  pts.push([x, y]);
+  while (y < groundY) { y += random(25, 55); x += random(-40, 40); pts.push([x, y]); }
+  bolt = pts; boltLife = 10;
+  thunder();
+}
+
+function drawLightning() {
+  if (bolt && boltLife > 0) {
+    stroke(255, 255, 255, 255); strokeWeight(3.5); noFill();
+    beginShape(); for (const p of bolt) vertex(p[0], p[1]); endShape();
+    stroke(180, 200, 255, 90); strokeWeight(10);
+    beginShape(); for (const p of bolt) vertex(p[0], p[1]); endShape();
+    boltLife--;
+  }
+  if (flash > 1) {
+    noStroke(); fill(220, 230, 255, flash * 0.55);
+    rect(0, 0, width, height);
+    flash *= 0.86;
+  }
+}
+
+// ---------- Main loop ----------
+function mouseMoved() { windTarget = map(mouseX, 0, width, -4, 4); }
+
+function draw() {
+  const ph = (millis() - epoch) / BEAT_MS;
+  drawSky();
+  drawGround();
+  for (const c of cats) drawCat(c, ph);
+  updateRain();
+  drawRain();
+  drawLightning();
+
+  noStroke();
+  fill(255, 255, 255, 150);
+  textFont('system-ui, sans-serif'); textSize(13); textAlign(LEFT, TOP);
+  text('move mouse = wind   ·   click = lightning', 16, 16);
+}
+
+// ---------- Sound (plain WebAudio, no p5.sound needed) ----------
+let ac, master, noiseBuf, schedTimer, nextTime = 0, step = 0, soundOn = false;
+const SCALE = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33]; // A minor pentatonic-ish
+const BASS = [110, 110, 130.81, 98];
+
+function makeNoise() {
+  const b = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+
+function noiseSrc(loop) {
+  const s = ac.createBufferSource(); s.buffer = noiseBuf; s.loop = !!loop; return s;
+}
+
+function startAudio() {
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0.7; master.connect(ac.destination);
+  noiseBuf = makeNoise();
+
+  // steady rain bed
+  const rain = noiseSrc(true);
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 900;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 7000;
+  const rg = ac.createGain(); rg.gain.value = 0.16;
+  rain.connect(hp); hp.connect(lp); lp.connect(rg); rg.connect(master); rain.start();
+
+  nextTime = ac.currentTime + 0.12; step = 0;
+  epoch = millis() + (nextTime - ac.currentTime) * 1000;   // line the dance up with beat 1
+  schedTimer = setInterval(scheduler, 25);
+}
+
+function scheduler() {
+  const eighth = 60 / BPM / 2;
+  while (nextTime < ac.currentTime + 0.15) { playStep(step, nextTime); nextTime += eighth; step++; }
+}
+
+function env(g, t, a, peak, dur) {
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+}
+
+function tone(type, f, t, dur, peak, dest) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  env(g, t, 0.01, peak, dur);
+  o.connect(g); g.connect(dest || master); o.start(t); o.stop(t + dur + 0.05);
+}
+
+function playStep(n, t) {
+  const beat = n / 2, onBeat = n % 2 === 0;
+  if (onBeat) {
+    // kick
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    env(g, t, 0.005, 0.9, 0.22);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.25);
+    // bass line
+    tone('triangle', BASS[Math.floor(beat / 2) % BASS.length], t, 0.35, 0.35);
+    // snare on 2 & 4
+    if (beat % 2 === 1) {
+      const s = noiseSrc(), f = ac.createBiquadFilter(), g2 = ac.createGain();
+      f.type = 'bandpass'; f.frequency.value = 1800;
+      env(g2, t, 0.003, 0.35, 0.14);
+      s.connect(f); f.connect(g2); g2.connect(master); s.start(t, Math.random()); s.stop(t + 0.16);
+    }
+  } else {
+    // off-beat hat
+    const s = noiseSrc(), f = ac.createBiquadFilter(), g = ac.createGain();
+    f.type = 'highpass'; f.frequency.value = 7000;
+    env(g, t, 0.002, 0.18, 0.05);
+    s.connect(f); f.connect(g); g.connect(master); s.start(t, Math.random()); s.stop(t + 0.07);
+  }
+  // little melody
+  if (Math.random() < 0.55) {
+    const f = SCALE[Math.floor(Math.random() * SCALE.length)];
+    tone('sine', f, t, 0.3, 0.1);
+    tone('sine', f * 2, t, 0.2, 0.03);
+  }
+}
+
+function thunder() {
+  if (!soundOn || !ac) return;
+  const t = ac.currentTime + 0.35;
+  const s = noiseSrc(), f = ac.createBiquadFilter(), g = ac.createGain();
+  f.type = 'lowpass'; f.frequency.setValueAtTime(400, t); f.frequency.exponentialRampToValueAtTime(80, t + 2);
+  env(g, t, 0.05, 1.2, 2.4);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t, Math.random()); s.stop(t + 2.5);
+}
+
+document.getElementById('sound').addEventListener('click', e => {
+  const btn = e.currentTarget;
+  if (!ac) { startAudio(); soundOn = true; }
+  else if (soundOn) { ac.suspend(); soundOn = false; }
+  else { ac.resume(); soundOn = true; }
+  btn.textContent = soundOn ? '🔊 Sound on' : '🔇 Sound off';
+  btn.blur();
+});
+</script>
+</body>
+</html>
